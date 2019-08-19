@@ -102,7 +102,7 @@
   (interactive)
   (shell-command
    (format "sqlite3 %s < %smigrate.sql"
-           priorg-db
+           priorg-db-path
            (file-name-directory buffer-file-name))))
 
 (defun priorg-queue-add (name desc)
