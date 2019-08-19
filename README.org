@@ -1,3 +1,7 @@
 #+TITLE: priorganize.el
 
 * Manage your priorities!
+** Getting Started
+- ~(setq priorg-dp-path <file-path>)~
+- M-x ~priorganize~
+- start priorganizing
