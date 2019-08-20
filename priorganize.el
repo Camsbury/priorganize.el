@@ -62,13 +62,20 @@
     (setq tabulated-list-format columns)
     (setq tabulated-list-entries rows)
     (tabulated-list-init-header)
-    (tabulated-list-print)))
+    (tabulated-list-print)
+    (read-only-mode)))
 
-(defvar priorg-mode-map
-  (let ((map (make-sparse-keymap)))
-    (define-key map (kbd "RET") 'priorg-queue-mode)))
+(defvar priorg-mode-map nil "Keymap for `priorg-mode'")
+(progn
+  (setq priorg-mode-map (make-sparse-keymap))
+  (define-key priorg-mode-map (kbd "C-c a") 'priorg-queue-list))
 
 ;; Queue Mode
+(defun priorg-queue-list ()
+  (interactive)
+  "List queues"
+  (switch-to-buffer "*priorganize-queues*")
+  (priorg-queue-mode))
 (defconst priorg-queue-list-sql
   "SELECT id, name, description FROM queues;")
 (define-derived-mode priorg-queue-mode tabulated-list-mode "Priorganize Queues"
@@ -78,15 +85,16 @@
                       (cadr (assoc 'rows table))))
          (tl-format [("Name" 20) ("Description" 60)])
          (tl-rows (mapcar (lambda (x) (list (car x) (cadr x))) rows)))
-    (switch-to-buffer "*priorganize-queues*")
     (setq tabulated-list-format tl-format)
     (setq tabulated-list-entries tl-rows)
     (tabulated-list-init-header)
-    (tabulated-list-print)))
+    (tabulated-list-print)
+    (read-only-mode)))
 
-(defvar priorg-mode-map
-  (let ((map (make-sparse-keymap)))
-    (define-key map (kbd "n") 'priorg-queue-add)))
+(defvar priorg-queue-mode-map nil "Keymap for `priorg-queue-mode'")
+(progn
+  (setq priorg-queue-mode-map (make-sparse-keymap))
+  (define-key priorg-queue-mode-map (kbd "C-c n") 'priorg-queue-add))
 
 ;;; Entry Point
 
@@ -109,10 +117,11 @@
   "Adds a new queue to prioritize items in"
   (interactive "sQueue name: \nsDescription: ")
   (let ((q-id (uuid-to-stringy (uuid-create))))
-    (db-execute db (format
+    (priorg-db-execute priorg-db-path (format
       "INSERT INTO queues \
        VALUES ('%s', '%s', '%s')"
-      q-id name desc))))
+      q-id name desc)))
+  (priorg-queue-list))
 
 
 (provide 'priorganize)
