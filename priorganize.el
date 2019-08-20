@@ -39,18 +39,36 @@
 
 ;;; Helpers
 
+(defconst priorg-global-queue-id
+  "d3f8e89c-8994-5d24-ff33-5610abfaf294")
+
+(defvar priorg-current-queue
+  priorg-global-queue-id)
+
 (defun priorg-db-execute (db query)
     (shell-command
      (format "sqlite3 %s \"%s\"" priorg-db-path query)))
-
 
 (defun priorg-db-fetch (db query)
   (let* ((raw-output (shell-command-to-string
                      (format "sqlite3 -header %s \"%s\"" priorg-db-path query)))
          (output (split-string raw-output "\n"))
          (column-names (split-string (car output) "|"))
-         (rows (--map (split-string it "|") (cdr output))))
+         (rows (delete '("") (--map (split-string it "|") (cdr output)))))
     `((column-names ,column-names) (rows ,rows))))
+
+;;; Entry Point
+
+(defun priorganize (db)
+  "Start priorganizing"
+  (interactive "sDatabase Name (default ~/priorg.db): ")
+  (unless (eq db "")
+      (setq priorg-db-path db)
+    (setq priorg-db-path "~/priorg.db"))
+  (unless (file-exists-p priorg-db-path)
+    (priorg-migrate))
+  (switch-to-buffer "*priorganize-main*")
+  (priorg-mode))
 
 ;;; Major Modes
 
@@ -58,7 +76,8 @@
 (define-derived-mode priorg-mode tabulated-list-mode "Priorganize"
   "Priorganize Mode"
   (let ((columns [("Options" 80)])
-        (rows (list '(:queues ["Queues"]))))
+        (rows (list '(:queues ["Queues"])
+                    '(:items  ["Items"]))))
     (setq tabulated-list-format columns)
     (setq tabulated-list-entries rows)
     (tabulated-list-init-header)
@@ -68,16 +87,28 @@
 (defvar priorg-mode-map nil "Keymap for `priorg-mode'")
 (progn
   (setq priorg-mode-map (make-sparse-keymap))
-  (define-key priorg-mode-map (kbd "C-c a") 'priorg-queue-list))
+  (define-key priorg-mode-map (kbd "C-c RET") 'priorg-dispatch)
+  (define-key priorg-mode-map (kbd "C-c q") 'kill-this-buffer))
+
+(defun priorg-dispatch ()
+  "dispatch from priorganize menu"
+  (interactive)
+  (let ((cmd (tabulated-list-get-id)))
+    (cond ((eq :queues cmd) (priorg-queue-list))
+          ((eq :items  cmd) (priorg-item-list)))))
 
 ;; Queue Mode
 (defun priorg-queue-list ()
-  (interactive)
   "List queues"
+  (interactive)
   (switch-to-buffer "*priorganize-queues*")
   (priorg-queue-mode))
+
 (defconst priorg-queue-list-sql
-  "SELECT id, name, description FROM queues;")
+  "SELECT id, name, description \
+   FROM queues \
+   ORDER BY name;")
+
 (define-derived-mode priorg-queue-mode tabulated-list-mode "Priorganize Queues"
   "Priorganize Queue Mode"
   (let* ((table (priorg-db-fetch priorg-db-path priorg-queue-list-sql))
@@ -91,17 +122,56 @@
     (tabulated-list-print)
     (read-only-mode)))
 
-(defvar priorg-queue-mode-map nil "Keymap for `priorg-queue-mode'")
+(defvar priorg-queue-mode-map nil "keymap for `priorg-queue-mode'")
 (progn
   (setq priorg-queue-mode-map (make-sparse-keymap))
-  (define-key priorg-queue-mode-map (kbd "C-c n") 'priorg-queue-add))
+  (define-key priorg-queue-mode-map (kbd "C-c n") 'priorg-queue-add)
+  (define-key priorg-queue-mode-map (kbd "C-c q") 'kill-this-buffer))
 
-;;; Entry Point
-
-(defun priorganize ()
+;; Item Mode
+(defun priorg-item-list ()
+  "List items"
   (interactive)
-  (switch-to-buffer "*priorganize-main*")
-  (priorg-mode))
+  (let* ((table-id (tabulated-list-get-id))
+         (queue-id (if (eq :items table-id)
+                    priorg-global-queue-id
+                  table-id)))
+    (setq priorg-current-queue queue-id)
+    (priorg--item-list)))
+
+(defun priorg--item-list ()
+  "Switch to list view without updating active queue"
+  (switch-to-buffer "*priorganize-items*")
+  (priorg-item-mode))
+
+(defconst priorg-item-list-sql
+  "SELECT i.id, i.name, i.description \
+   FROM items i \
+   INNER JOIN items_queues iq \
+   ON i.id = iq.item_id
+   WHERE iq.queue_id = '%s'
+   ORDER BY name")
+
+(define-derived-mode priorg-item-mode tabulated-list-mode "Priorganize Items"
+  "Priorganize Item Mode"
+  (let* ((table (priorg-db-fetch priorg-db-path
+                                 (format priorg-item-list-sql
+                                         priorg-current-queue)))
+         (rows (--map (list (car it) (apply 'vector (cdr it))) ;grab id
+                      (cadr (assoc 'rows table))))
+         (tl-format [("Name" 20) ("Description" 60)])
+         (tl-rows (mapcar (lambda (x) (list (car x) (cadr x))) rows)))
+    (setq tabulated-list-format tl-format)
+    (setq tabulated-list-entries tl-rows)
+    (tabulated-list-init-header)
+    (tabulated-list-print)
+    (read-only-mode)))
+
+(defvar priorg-item-mode-map nil "keymap for `priorg-item-mode'")
+(progn
+  (setq priorg-item-mode-map (make-sparse-keymap))
+  (define-key priorg-item-mode-map (kbd "C-c n") 'priorg-item-add)
+  (define-key priorg-item-mode-map (kbd "C-c q") 'kill-this-buffer))
 
 ;;; Commands
 
@@ -119,9 +189,21 @@
   (let ((q-id (uuid-to-stringy (uuid-create))))
     (priorg-db-execute priorg-db-path (format
       "INSERT INTO queues \
-       VALUES ('%s', '%s', '%s')"
+       VALUES ('%s', '%s', '%s');"
       q-id name desc)))
   (priorg-queue-list))
+
+(defun priorg-item-add (name desc)
+  "Adds a new item to prioritize"
+  (interactive "sItem name: \nsDescription: ")
+  (let ((q-id (uuid-to-stringy (uuid-create))))
+    (priorg-db-execute priorg-db-path (format
+      "INSERT INTO items \
+       VALUES ('%s', '%s', '%s');\
+       INSERT INTO items_queues (item_id, queue_id) \
+       VALUES ('%s', '%s');"
+      q-id name desc q-id priorg-global-queue-id))
+  (priorg--item-list)))
 
 
 (provide 'priorganize)
