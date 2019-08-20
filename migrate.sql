@@ -2,7 +2,7 @@
 
 CREATE TABLE IF NOT EXISTS queues
 ( id VARCHAR(36) PRIMARY KEY,
-  name VARCHAR(255) NOT NULL,
+  name VARCHAR(255) UNIQUE NOT NULL,
   description TEXT
 );
 
