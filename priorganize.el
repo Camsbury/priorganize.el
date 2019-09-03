@@ -42,7 +42,7 @@
 (defconst priorg-global-queue-id
   "d3f8e89c-8994-5d24-ff33-5610abfaf294")
 
-(defvar priorg-current-queue
+(setq priorg-current-queue
   priorg-global-queue-id)
 
 (defun priorg-db-execute (db query)
@@ -125,6 +125,7 @@
 (defvar priorg-queue-mode-map nil "keymap for `priorg-queue-mode'")
 (progn
   (setq priorg-queue-mode-map (make-sparse-keymap))
+  (define-key priorg-queue-mode-map (kbd "C-c i") 'priorg-item-list)
   (define-key priorg-queue-mode-map (kbd "C-c n") 'priorg-queue-add)
   (define-key priorg-queue-mode-map (kbd "C-c q") 'kill-this-buffer))
 
@@ -202,7 +203,7 @@
        VALUES ('%s', '%s', '%s');\
        INSERT INTO items_queues (item_id, queue_id) \
        VALUES ('%s', '%s');"
-      q-id name desc q-id priorg-global-queue-id))
+      q-id name desc q-id priorg-current-queue))
   (priorg--item-list)))
 
 
@@ -219,7 +220,7 @@
 
 (comment
 
-
+  (delete-file "~/priorg.db")
   (apply 'vector (--map `(,it 50 t) (cadr (assoc 'column-names (db-fetch priorg-db-path "SELECT name, description FROM queues;")))))
   (mapcar (lambda (x) `(nil ,x)) (--map (apply 'vector it) (cadr (assoc 'rows (db-fetch priorg-db-path "SELECT name, description FROM queues;")))))
 
